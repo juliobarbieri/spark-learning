@@ -20,7 +20,7 @@ import org.apache.spark.sql._
 import org.apache.spark.sql.types._
 import org.apache.spark.ml.linalg.SQLDataTypes.VectorType
 
-case class DatasetRow(label:Option[Double],features:Option[Vector[Double]]) 
+case class DatasetRow(user:Option[Int],item:Option[Int],label:Option[Double],features:Option[Vector[Double]]) 
 val sqlContext = new org.apache.spark.sql.SQLContext(sc)
 import sqlContext.implicits._
 
@@ -57,20 +57,29 @@ object Test extends Serializable {
     }
     def main(args: Array[String]) {
         
-        val filename = "/home/juliobarbieri/Desenvolvimento/spark_codes/data/ml-100k/u.data"
-        val f = sc.textFile(filename) 
-        val dataset = f.map(_.split('\t') match {
+        // Load Train files
+        val trainFilename = "/home/juliobarbieri/Desenvolvimento/spark_codes/data/ml-100k/folds/u1.base"
+        val fTrain = sc.textFile(trainFilename)
+        val datasetTrain = fTrain.map(_.split('\t') match {
+                case Array(userId, itemId, rating, time) => (userId.toInt, itemId.toInt, rating.toDouble, time.toDouble)
+            }
+        )
+        
+        // Load Test files
+        val testFilename = "/home/juliobarbieri/Desenvolvimento/spark_codes/data/ml-100k/folds/u1.test"
+        val fTest = sc.textFile(testFilename)
+        val datasetTest = fTest.map(_.split('\t') match {
                 case Array(userId, itemId, rating, time) => (userId.toInt, itemId.toInt, rating.toDouble, time.toDouble)
             }
         )
         
         // Normalization
         val normalization = 1
-        val avgs = calculateAverage(dataset, normalization)
-        val normalizedDataset = if (normalization == 1) dataset.map(line => (line._1, line._2, line._3 - avgs(line._1 - 1), line._4)) else dataset.map(line => (line._1, line._2, line._3 - avgs(line._2 - 1), line._4))
+        val avgs = calculateAverage(datasetTrain, normalization)
+        val normalizedDataset = if (normalization == 1) datasetTrain.map(line => (line._1, line._2, line._3 - avgs(line._1 - 1), line._4)) else datasetTrain.map(line => (line._1, line._2, line._3 - avgs(line._2 - 1), line._4))
         // End
         
-        val coMatrix = new CoordinateMatrix(dataset.map {
+        val coMatrix = new CoordinateMatrix(datasetTrain.map {
             case (userId, itemId, rating, time) => MatrixEntry(userId, itemId, rating)
         })
         
@@ -86,15 +95,23 @@ object Test extends Serializable {
         val Ui = U.rows.collect
         val Vi = Array() ++ V.rowIter
         
-        var arrayData = normalizedDataset.map(line => Vectors.dense(line._3).toArray ++ getIndex(Ui, line._1).toArray ++ Vi(line._2).toArray)
+        // Prepare Train Data
+        var arrayDataTrain = normalizedDataset.map(line => Vectors.dense(line._1).toArray ++ Vectors.dense(line._2).toArray ++ Vectors.dense(line._3).toArray ++ getIndex(Ui, line._1).toArray ++ Vi(line._2).toArray)
         
-        val rdd = arrayData.map(x => (x(0), org.apache.spark.ml .linalg.Vectors.dense(x.drop(1))))
-        val df = rdd.toDF("label", "features")
-        df.show(5, true)
+        val rddTrain = arrayDataTrain.map(x => (x(0), x(1), x(2), org.apache.spark.ml.linalg.Vectors.dense(x.drop(3).drop(2).drop(1))))
+        val train = rddTrain.toDF("user", "item", "label", "features")
+        //df.show(5, true)
         
+        // Prepare Test Data
+        var arrayDataTest = datasetTest.map(x => (x(0), x(1), x(2), org.apache.spark.ml.linalg.Vectors.dense(x.drop(3).drop(2).drop(1))))
+        
+        val rddTest = arrayDataTest.map(x => (x(0), x(1), x(2), org.apache.spark.ml.linalg.Vectors.dense(x.drop(3).drop(2).drop(1))))
+        val test = rddTest.toDF("user", "item", "label", "features")
+        
+        val data = train.unionAll(test);
         // Apply Random Forest
         // Load and parse the data file, converting it to a DataFrame.
-        val data = df
+        //val data = train
 
         val numTrees = 50
 
@@ -107,7 +124,7 @@ object Test extends Serializable {
           .fit(data)
 
         // Split the data into training and test sets (30% held out for testing).
-        val Array(trainingData, testData) = data.randomSplit(Array(0.9, 0.1))
+        //val Array(trainingData, testData) = data.randomSplit(Array(0.9, 0.1))
 
         // Train a RandomForest model.
         val rf = new RandomForestRegressor()
@@ -120,13 +137,25 @@ object Test extends Serializable {
           .setStages(Array(featureIndexer, rf))
 
         // Train model. This also runs the indexer.
-        val model = pipeline.fit(trainingData)
+        val model = pipeline.fit(train)
 
         // Make predictions.
-        val predictions = model.transform(testData)
+        val predictions = model.transform(test)
 
         // Select example rows to display.
         predictions.select("prediction", "label", "features").show(5)
+
+        ////
+        /*val schema = StructType(
+            Array(
+            StructField("user", IntegerType, true),
+            StructField("item", IntegerType, true),
+            StructField("rating", DoubleType, true), 
+            StructField("time", DoubleType, true) ))
+        val rdd4 = datasetTest.map(x => Row(x._1, x._2, x._3, x._4))
+        val df = sqlContext.createDataFrame(rdd4, schema)
+        df.withColumn("prediction", predictions("prediction")).show*/
+        ////
 
         // Select (prediction, true label) and compute test error.
         val evaluator = new RegressionEvaluator()
