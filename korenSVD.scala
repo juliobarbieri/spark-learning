@@ -8,7 +8,7 @@ def parseRating(str: String): Rating = {
   Rating(fields(0).toInt, fields(1).toInt, fields(2).toFloat, fields(3).toLong)
 }
 
-val nFolds   = 10
+val nFolds   = 1
 
 val maxIter  = 14
 val factors  = 7

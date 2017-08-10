@@ -15,13 +15,15 @@ import org.apache.spark.ml.Pipeline
 import org.apache.spark.ml.evaluation.RegressionEvaluator
 import org.apache.spark.ml.feature.VectorIndexer
 import org.apache.spark.ml.regression.{RandomForestRegressionModel, RandomForestRegressor}
+import org.apache.spark.ml.regression.{GBTRegressionModel, GBTRegressor}
 
 import org.apache.spark.sql._
 import org.apache.spark.sql.types._
 import org.apache.spark.ml.linalg.SQLDataTypes.VectorType
 import scala.collection.Map
 
-case class DatasetRow(user:Option[Int], item:Option[Int], label:Option[Double],features:Option[Vector[Double]]) 
+case class UntrainedDataset(user:Double, item:Double, label:Double, features:org.apache.spark.ml.linalg.Vector)
+case class TrainedDataset(user:Double, item:Double, label:Double, prediction:Double)  
 val sqlContext = new org.apache.spark.sql.SQLContext(sc)
 import sqlContext.implicits._
 
@@ -38,12 +40,7 @@ def createDataFrame(dataset :RDD[(Int, Int, Double, Double)]) : DataFrame = {
 }
 
 def getIndex(array: Array[IndexedRow], index: Int) : org.apache.spark.mllib.linalg.Vector = {
-    for (element <- array) {
-        if (element.index == index) {
-            return element.vector
-        }
-    }
-    return Vectors.dense(0.0)
+    return array.filter(x => x.index == index)(0).vector
 }
 
 def remapIds(dataset :RDD[(Int, Int, Double, Double)], normalization :Int) : Map[Int,Int] = {
@@ -92,7 +89,7 @@ def prepareData(U: IndexedRowMatrix, V: Matrix, dataset :RDD[(Int, Int, Double, 
     // Prepare Train Data
     var arrayData = dataset.map(line => Vectors.dense(line._1).toArray ++ Vectors.dense(line._2).toArray ++ Vectors.dense(line._3).toArray ++ getIndex(Ui, line._1).toArray ++ Vi(line._2).toArray)
     
-    val rdd = arrayData.map(x => (x(0), x(1), x(2), org.apache.spark.ml.linalg.Vectors.dense(x.drop(1).drop(1).drop(1))))
+    val rdd = arrayData.map(x => UntrainedDataset(x(0), x(1), x(2), org.apache.spark.ml.linalg.Vectors.dense(x.drop(1).drop(1).drop(1))))
     val data = rdd.toDF("user", "item", "label", "features")
     return data
 }
@@ -158,7 +155,7 @@ val model = pipeline.fit(train)
 var predictions = model.transform(test)
 
 // DeNormalization
-predictions = if (normalization == 1) predictions.rdd.map(x => (x(0).asInstanceOf[Double], x(1).asInstanceOf[Double], x(2).asInstanceOf[Double], x(5).asInstanceOf[Double] + avgs(x(0).asInstanceOf[Double].toInt - 1))).toDF("user", "item", "label", "prediction") else predictions.rdd.map(x => (x(0).asInstanceOf[Double], x(1).asInstanceOf[Double], x(2).asInstanceOf[Double], x(5).asInstanceOf[Double] + avgs(x(1).asInstanceOf[Double].toInt - 1))).toDF("user", "item", "label", "prediction")
+predictions = if (normalization == 1) predictions.rdd.map(x => TrainedDataset(x(0).asInstanceOf[Double], x(1).asInstanceOf[Double], x(2).asInstanceOf[Double], x(5).asInstanceOf[Double] + avgs(x(0).asInstanceOf[Double].toInt - 1))).toDF("user", "item", "label", "prediction") else predictions.rdd.map(x => TrainedDataset(x(0).asInstanceOf[Double], x(1).asInstanceOf[Double], x(2).asInstanceOf[Double], x(5).asInstanceOf[Double] + avgs(x(1).asInstanceOf[Double].toInt - 1))).toDF("user", "item", "label", "prediction")
 
 //predictions = predictions.withColumn("prediction", when(col("prediction").lt(1.0), 1.0)).withColumn("prediction", when(col("prediction").gt(5.0), 5.0))
 
