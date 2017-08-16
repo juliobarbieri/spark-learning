@@ -3,6 +3,7 @@ import org.apache.spark.ml.linalg.VectorUDT
 import org.apache.spark.ml.linalg.Vector
 import org.apache.spark.mllib.linalg.distributed.IndexedRowMatrix
 import org.apache.spark.mllib.linalg.SingularValueDecomposition
+import org.apache.spark.ml.PipelineModel
 import scala.io.Source._
 import org.apache.spark.sql.SparkSession
 
@@ -23,7 +24,8 @@ import org.apache.spark.ml.linalg.SQLDataTypes.VectorType
 import scala.collection.Map
 
 case class UntrainedDataset(user:Double, item:Double, label:Double, features:org.apache.spark.ml.linalg.Vector)
-case class TrainedDataset(user:Double, item:Double, label:Double, prediction:Double)  
+case class TrainedDataset(user:Double, item:Double, label:Double, prediction:Double)
+case class customException(smth:String)  extends Exception
 val sqlContext = new org.apache.spark.sql.SQLContext(sc)
 import sqlContext.implicits._
 
@@ -93,12 +95,37 @@ def prepareData(U: IndexedRowMatrix, V: Matrix, dataset :RDD[(Int, Int, Double, 
     val data = rdd.toDF("user", "item", "label", "features")
     return data
 }
+
+def fitModel(modelType: String, train: DataFrame, parameters: Array[Int]) : PipelineModel = {
+    val featureIndexer = new VectorIndexer().setInputCol("features").setOutputCol("indexedFeatures").setMaxCategories(4).fit(train)
     
+    if (modelType != "RandomForest" && modelType != "GBTrees") {
+        throw new IllegalArgumentException
+    }
+    
+    if (modelType == "RandomForest" && parameters.size != 2) {
+        throw new IllegalArgumentException
+    }
+    
+    if (modelType == "GBTrees" && parameters.size != 2) {
+        throw new IllegalArgumentException
+    }
+    
+    val sl = if (modelType == "RandomForest") new RandomForestRegressor().setLabelCol("label").setFeaturesCol("indexedFeatures").setNumTrees(parameters(0)).setMaxDepth(parameters(1)) else new GBTRegressor().setLabelCol("label").setFeaturesCol("indexedFeatures").setMaxIter(parameters(0)).setMaxDepth(parameters(1))
+    
+    val pipeline = new Pipeline().setStages(Array(featureIndexer, sl))
+    val model = pipeline.fit(train)
+    return model
+}
+
 // Parameters
+val slParameters = Array(50, 20)
+
 val factors         = 8
-val numTrees        = 50
-val normalization   = 2
-val maxDepth        = 20
+val normalization   = 2 
+//val numTrees        = 50
+//val maxDepth        = 20
+val modelType       = "RandomForest"
 
 val trainFilename = "/home/juliobarbieri/Desenvolvimento/spark_codes/data/ml-100k/folds/u1.base"
 val testFilename = "/home/juliobarbieri/Desenvolvimento/spark_codes/data/ml-100k/folds/u1.test"
@@ -148,10 +175,7 @@ val train = prepareData(U, V, normalizedDataset)
 val test = prepareData(U, V, filteredDatasetTest)
 
 // Train a Supervised Learning model.
-val featureIndexer = new VectorIndexer().setInputCol("features").setOutputCol("indexedFeatures").setMaxCategories(4).fit(train)
-val rf = new RandomForestRegressor().setLabelCol("label").setFeaturesCol("indexedFeatures").setNumTrees(numTrees).setMaxDepth(maxDepth)
-val pipeline = new Pipeline().setStages(Array(featureIndexer, rf))
-val model = pipeline.fit(train)
+val model = fitModel(modelType, train, slParameters)
 var predictions = model.transform(test)
 
 // DeNormalization
