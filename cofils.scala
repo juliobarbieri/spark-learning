@@ -20,7 +20,6 @@ import org.apache.spark.ml.regression.{GBTRegressionModel, GBTRegressor}
 
 import org.apache.spark.sql._
 import org.apache.spark.sql.types._
-import org.apache.spark.ml.linalg.SQLDataTypes.VectorType
 import scala.collection.Map
 
 case class UntrainedDataset(user:Double, item:Double, label:Double, features:org.apache.spark.ml.linalg.Vector)
@@ -183,7 +182,6 @@ predictions = if (normalization == 1) predictions.rdd.map(x => TrainedDataset(x(
 
 //predictions = predictions.withColumn("prediction", when(col("prediction").lt(1.0), 1.0)).withColumn("prediction", when(col("prediction").gt(5.0), 5.0))
 
-//pred.show()
 //// End
 
 // Select (prediction, true label) and compute test error.
