@@ -17,6 +17,7 @@ import org.apache.spark.ml.evaluation.RegressionEvaluator
 import org.apache.spark.ml.feature.VectorIndexer
 import org.apache.spark.ml.regression.{RandomForestRegressionModel, RandomForestRegressor}
 import org.apache.spark.ml.regression.{GBTRegressionModel, GBTRegressor}
+import org.apache.spark.ml.regression.DecisionTreeRegressor
 
 import org.apache.spark.sql._
 import org.apache.spark.sql.types._
@@ -98,7 +99,7 @@ def prepareData(U: IndexedRowMatrix, V: Matrix, dataset :RDD[(Int, Int, Double, 
 def fitModel(modelType: String, train: DataFrame, parameters: Array[Int]) : PipelineModel = {
     val featureIndexer = new VectorIndexer().setInputCol("features").setOutputCol("indexedFeatures").setMaxCategories(4).fit(train)
     
-    if (modelType != "RandomForest" && modelType != "GBTrees") {
+    if (modelType != "RandomForest" && modelType != "GBTrees" && modelType != "DecisionTree") {
         throw new IllegalArgumentException
     }
     
@@ -110,7 +111,11 @@ def fitModel(modelType: String, train: DataFrame, parameters: Array[Int]) : Pipe
         throw new IllegalArgumentException
     }
     
-    val sl = if (modelType == "RandomForest") new RandomForestRegressor().setLabelCol("label").setFeaturesCol("indexedFeatures").setNumTrees(parameters(0)).setMaxDepth(parameters(1)) else new GBTRegressor().setLabelCol("label").setFeaturesCol("indexedFeatures").setMaxIter(parameters(0)).setMaxDepth(parameters(1))
+    if (modelType == "DecisionTree" && parameters.size != 1) {
+        throw new IllegalArgumentException
+    }
+    
+    val sl = if (modelType == "RandomForest") new RandomForestRegressor().setLabelCol("label").setFeaturesCol("indexedFeatures").setNumTrees(parameters(0)).setMaxDepth(parameters(1)) else if (modelType == "GBTrees") new GBTRegressor().setLabelCol("label").setFeaturesCol("indexedFeatures").setMaxIter(parameters(0)).setMaxDepth(parameters(1)) else new DecisionTreeRegressor().setLabelCol("label").setFeaturesCol("indexedFeatures").setMaxDepth(parameters(0))
     
     val pipeline = new Pipeline().setStages(Array(featureIndexer, sl))
     val model = pipeline.fit(train)
