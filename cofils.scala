@@ -18,6 +18,7 @@ import org.apache.spark.ml.feature.VectorIndexer
 import org.apache.spark.ml.regression.{RandomForestRegressionModel, RandomForestRegressor}
 import org.apache.spark.ml.regression.{GBTRegressionModel, GBTRegressor}
 import org.apache.spark.ml.regression.DecisionTreeRegressor
+import org.apache.spark.ml.regression.LinearRegression
 
 import org.apache.spark.sql._
 import org.apache.spark.sql.types._
@@ -96,10 +97,10 @@ def prepareData(U: IndexedRowMatrix, V: Matrix, dataset :RDD[(Int, Int, Double, 
     return data
 }
 
-def fitModel(modelType: String, train: DataFrame, parameters: Array[Int]) : PipelineModel = {
+def fitModel(modelType: String, train: DataFrame, parameters: Array[Double]) : PipelineModel = {
     val featureIndexer = new VectorIndexer().setInputCol("features").setOutputCol("indexedFeatures").setMaxCategories(4).fit(train)
     
-    if (modelType != "RandomForest" && modelType != "GBTrees" && modelType != "DecisionTree") {
+    if (modelType != "RandomForest" && modelType != "GBTrees" && modelType != "DecisionTree" && modelType != "LinearRegression") {
         throw new IllegalArgumentException
     }
     
@@ -115,7 +116,11 @@ def fitModel(modelType: String, train: DataFrame, parameters: Array[Int]) : Pipe
         throw new IllegalArgumentException
     }
     
-    val sl = if (modelType == "RandomForest") new RandomForestRegressor().setLabelCol("label").setFeaturesCol("indexedFeatures").setNumTrees(parameters(0)).setMaxDepth(parameters(1)) else if (modelType == "GBTrees") new GBTRegressor().setLabelCol("label").setFeaturesCol("indexedFeatures").setMaxIter(parameters(0)).setMaxDepth(parameters(1)) else new DecisionTreeRegressor().setLabelCol("label").setFeaturesCol("indexedFeatures").setMaxDepth(parameters(0))
+    if (modelType == "LinearRegression" && parameters.size != 3) {
+        throw new IllegalArgumentException
+    }
+    
+    val sl = if (modelType == "RandomForest") new RandomForestRegressor().setLabelCol("label").setFeaturesCol("indexedFeatures").setNumTrees(parameters(0).asInstanceOf[Int]).setMaxDepth(parameters(1).asInstanceOf[Int]) else if (modelType == "GBTrees") new GBTRegressor().setLabelCol("label").setFeaturesCol("indexedFeatures").setMaxIter(parameters(0).asInstanceOf[Int]).setMaxDepth(parameters(1).asInstanceOf[Int]) else if (modelType == "DecisionTree") new DecisionTreeRegressor().setLabelCol("label").setFeaturesCol("indexedFeatures").setMaxDepth(parameters(0).asInstanceOf[Int]) else new LinearRegression().setLabelCol("label").setFeaturesCol("indexedFeatures").setMaxIter(parameters(0).asInstanceOf[Int]).setRegParam(parameters(1)).setElasticNetParam(parameters(2))
     
     val pipeline = new Pipeline().setStages(Array(featureIndexer, sl))
     val model = pipeline.fit(train)
@@ -123,12 +128,10 @@ def fitModel(modelType: String, train: DataFrame, parameters: Array[Int]) : Pipe
 }
 
 // Parameters
-val slParameters = Array(50, 20)
+val slParameters :Array[Double] = Array(50, 20)
 
 val factors         = 8
 val normalization   = 2 
-//val numTrees        = 50
-//val maxDepth        = 20
 val modelType       = "RandomForest"
 
 val trainFilename = "/home/juliobarbieri/Desenvolvimento/spark_codes/data/ml-100k/folds/u1.base"
